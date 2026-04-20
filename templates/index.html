@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OctaveDebug — Local Static Analyzer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #07080f;
+      --surface:   #0e1018;
+      --surface2:  #131722;
+      --surface3:  #1a2030;
+      --border:    #1e2540;
+      --border2:   #2c3558;
+      --accent:    #5b8fff;
+      --accent-g:  #00e5c0;
+      --danger:    #ff4d6a;
+      --warn:      #ffb340;
+      --info:      #5b8fff;
+      --ok:        #00d48a;
+      --text:      #dde3f4;
+      --text2:     #7a85a8;
+      --text3:     #3d4668;
+      --code-bg:   #080c14;
+      --radius:    14px;
+      --font-ui:   'Outfit', sans-serif;
+      --font-code: 'JetBrains Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated background ─────────────────── */
+    .bg-layer {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    }
+    .bg-grid {
+      background-image:
+        linear-gradient(rgba(91,143,255,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(91,143,255,.04) 1px, transparent 1px);
+      background-size: 44px 44px;
+      width: 100%; height: 100%;
+    }
+    .bg-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(90px);
+      animation: drift 18s ease-in-out infinite alternate;
+    }
+    .orb1 { width: 560px; height: 560px; top: -160px; left: -120px;
+             background: radial-gradient(circle, rgba(91,143,255,.1) 0%, transparent 70%); }
+    .orb2 { width: 420px; height: 420px; bottom: -80px; right: -80px;
+             background: radial-gradient(circle, rgba(0,229,192,.07) 0%, transparent 70%);
+             animation-delay: -9s; }
+    @keyframes drift { to { transform: translate(30px, 20px); } }
+
+    /* ── Header ──────────────────────────────── */
+    header {
+      position: relative; z-index: 20;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 40px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(7,8,15,.7);
+      backdrop-filter: blur(24px);
+    }
+
+    .logo { display: flex; align-items: center; gap: 11px; text-decoration: none; }
+    .logo-mark {
+      width: 38px; height: 38px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-g));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 19px; flex-shrink: 0;
+      box-shadow: 0 0 20px rgba(91,143,255,.3);
+    }
+    .logo-name {
+      font-weight: 900; font-size: 1.25rem;
+      letter-spacing: -.03em; color: var(--text);
+    }
+    .logo-name em { color: var(--accent); font-style: normal; }
+
+    .header-pills { display: flex; gap: 8px; align-items: center; }
+    .pill {
+      font-size: .72rem; font-weight: 600; letter-spacing: .06em;
+      text-transform: uppercase; padding: 4px 11px; border-radius: 20px;
+      border: 1px solid;
+    }
+    .pill-local {
+      color: var(--accent-g); border-color: rgba(0,229,192,.3);
+      background: rgba(0,229,192,.07);
+    }
+    .pill-offline {
+      color: var(--text3); border-color: var(--border);
+      background: transparent;
+    }
+
+    /* ── Main layout ─────────────────────────── */
+    main {
+      position: relative; z-index: 10;
+      max-width: 980px; margin: 0 auto;
+      padding: 52px 24px 100px;
+    }
+
+    /* ── Hero ────────────────────────────────── */
+    .hero { text-align: center; margin-bottom: 44px; }
+    .hero-tag {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: .78rem; font-weight: 600; color: var(--accent);
+      letter-spacing: .08em; text-transform: uppercase;
+      padding: 5px 14px; border-radius: 20px;
+      background: rgba(91,143,255,.08); border: 1px solid rgba(91,143,255,.2);
+      margin-bottom: 18px;
+    }
+    .hero h1 {
+      font-size: clamp(2.1rem, 5vw, 3.4rem);
+      font-weight: 900; letter-spacing: -.04em; line-height: 1.08;
+      margin-bottom: 14px;
+    }
+    .hero h1 .grad {
+      background: linear-gradient(120deg, var(--accent) 0%, var(--accent-g) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      color: var(--text2); font-size: 1.05rem; line-height: 1.65;
+      max-width: 500px; margin: 0 auto;
+    }
+
+    /* ── Stat strip ──────────────────────────── */
+    .stats {
+      display: flex; gap: 0; margin-bottom: 32px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .stat {
+      flex: 1; padding: 14px 20px; text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .stat:last-child { border-right: none; }
+    .stat-num {
+      font-size: 1.5rem; font-weight: 700; font-family: var(--font-code);
+      color: var(--accent); line-height: 1;
+    }
+    .stat-label { font-size: .73rem; color: var(--text3); margin-top: 4px; }
+
+    /* ── Editor card ─────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 4px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(91,143,255,.04);
+      margin-bottom: 28px;
+    }
+
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 16px;
+      background: var(--surface2); border-bottom: 1px solid var(--border);
+    }
+    .win-dots { display: flex; gap: 6px; }
+    .wd { width: 12px; height: 12px; border-radius: 50%; }
+    .wd-r { background: #ff5f57; } .wd-y { background: #ffbd2e; } .wd-g { background: #28c840; }
+
+    .card-title {
+      font-family: var(--font-code); font-size: .73rem; color: var(--text3);
+      letter-spacing: .04em;
+    }
+
+    .card-actions { display: flex; gap: 8px; }
+
+    .btn-sm {
+      padding: 5px 14px; border-radius: 8px; font-size: .78rem; font-weight: 500;
+      font-family: var(--font-ui); cursor: pointer; transition: all .18s; border: 1px solid;
+    }
+    .btn-ghost {
+      background: transparent; border-color: var(--border2); color: var(--text2);
+    }
+    .btn-ghost:hover { border-color: var(--danger); color: var(--danger); }
+
+    #code-input {
+      width: 100%; min-height: 300px;
+      background: var(--code-bg); color: #c9d1e8;
+      font-family: var(--font-code); font-size: .875rem; line-height: 1.75;
+      border: none; outline: none; padding: 22px 24px;
+      resize: vertical; tab-size: 2;
+    }
+    #code-input::placeholder { color: #2a3250; }
+
+    .card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; border-top: 1px solid var(--border);
+    }
+    .footer-hint { font-size: .73rem; color: var(--text3); }
+
+    /* ── Analyze button ──────────────────────── */
+    .btn-analyze {
+      display: flex; align-items: center; gap: 8px;
+      padding: 11px 28px; border-radius: 10px; border: none;
+      background: linear-gradient(135deg, var(--accent), #3a6fe0);
+      color: #fff; font-family: var(--font-ui); font-weight: 700; font-size: .9rem;
+      cursor: pointer; transition: all .2s;
+      box-shadow: 0 0 24px rgba(91,143,255,.3);
+    }
+    .btn-analyze:hover { transform: translateY(-1px); box-shadow: 0 4px 32px rgba(91,143,255,.45); }
+    .btn-analyze:active { transform: translateY(0); }
+    .btn-analyze:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+    .btn-icon { font-size: 1rem; }
+
+    /* ── Loading ─────────────────────────────── */
+    #loading {
+      display: none; text-align: center; padding: 56px 20px;
+    }
+    .spin {
+      width: 44px; height: 44px; margin: 0 auto 18px;
+      border: 3px solid var(--border2); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .load-text { color: var(--text2); font-size: .9rem; }
+    .load-text::after {
+      content: ''; animation: ldots 1.5s steps(4, end) infinite;
+    }
+    @keyframes ldots {
+      0%,20%{content:''} 40%{content:'.'} 60%{content:'..'} 80%,100%{content:'...'}
+    }
+
+    /* ── Output ──────────────────────────────── */
+    #output { margin-top: 8px; }
+
+    /* Summary banner */
+    .summary-banner {
+      display: flex; gap: 16px; align-items: flex-start;
+      padding: 20px 24px; border-radius: var(--radius);
+      border: 1px solid; margin-bottom: 24px;
+      animation: rise .35s ease forwards;
+    }
+    .summary-icon { font-size: 1.5rem; flex-shrink: 0; margin-top: 1px; }
+    .summary-label {
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .09em; margin-bottom: 5px;
+    }
+    .summary-text { font-size: .9rem; line-height: 1.6; }
+
+    .banner-ok  { background: rgba(0,212,138,.06); border-color: rgba(0,212,138,.25); }
+    .banner-ok  .summary-label { color: var(--ok); }
+    .banner-ok  .summary-text { color: rgba(0,212,138,.85); }
+
+    .banner-err { background: rgba(255,77,106,.06); border-color: rgba(255,77,106,.2); }
+    .banner-err .summary-label { color: var(--danger); }
+    .banner-err .summary-text { color: var(--text2); }
+
+    /* Severity tabs */
+    .sev-strip {
+      display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap;
+    }
+    .sev-chip {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 13px; border-radius: 20px; font-size: .78rem; font-weight: 600;
+      border: 1px solid;
+    }
+    .chip-error  { color: var(--danger); border-color: rgba(255,77,106,.3); background: rgba(255,77,106,.07); }
+    .chip-warn   { color: var(--warn);   border-color: rgba(255,179,64,.3);  background: rgba(255,179,64,.07);  }
+    .chip-info   { color: var(--info);   border-color: rgba(91,143,255,.3);  background: rgba(91,143,255,.07);  }
+
+    /* Error cards */
+    .errors-title {
+      font-size: 1.05rem; font-weight: 700; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .err-badge {
+      font-size: .75rem; font-weight: 700; padding: 2px 10px; border-radius: 20px;
+      background: rgba(255,77,106,.12); color: var(--danger);
+      border: 1px solid rgba(255,77,106,.25);
+    }
+
+    .ecard {
+      border-radius: var(--radius); border: 1px solid var(--border);
+      background: var(--surface); overflow: hidden;
+      margin-bottom: 14px; transition: border-color .2s;
+      animation: rise .3s ease forwards; opacity: 0; transform: translateY(10px);
+    }
+    .ecard:hover { border-color: var(--border2); }
+    .ecard.open  { border-color: var(--border2); }
+
+    @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+    .ecard:nth-child(1){animation-delay:.04s}
+    .ecard:nth-child(2){animation-delay:.08s}
+    .ecard:nth-child(3){animation-delay:.12s}
+    .ecard:nth-child(4){animation-delay:.16s}
+    .ecard:nth-child(5){animation-delay:.20s}
+    .ecard:nth-child(6){animation-delay:.24s}
+
+    .ecard-head {
+      display: flex; align-items: center; gap: 12px;
+      padding: 13px 18px; cursor: pointer; user-select: none;
+      background: var(--surface2);
+    }
+
+    .sev-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .sev-dot.error  { background: var(--danger); box-shadow: 0 0 8px rgba(255,77,106,.5); }
+    .sev-dot.warning { background: var(--warn);  box-shadow: 0 0 8px rgba(255,179,64,.4); }
+    .sev-dot.info    { background: var(--info);  box-shadow: 0 0 8px rgba(91,143,255,.4); }
+
+    .ecard-num {
+      font-family: var(--font-code); font-size: .78rem; font-weight: 700;
+      width: 28px; height: 28px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .ecard-num.error   { background: rgba(255,77,106,.12); color: var(--danger); }
+    .ecard-num.warning { background: rgba(255,179,64,.12);  color: var(--warn); }
+    .ecard-num.info    { background: rgba(91,143,255,.12);   color: var(--info); }
+
+    .ecard-meta { flex: 1; min-width: 0; }
+    .ecard-type { font-weight: 600; font-size: .9rem; }
+    .ecard-line {
+      font-family: var(--font-code); font-size: .72rem; color: var(--text3); margin-top: 2px;
+    }
+
+    .ecard-chevron {
+      color: var(--text3); font-size: .75rem; transition: transform .22s;
+      flex-shrink: 0;
+    }
+    .ecard.open .ecard-chevron { transform: rotate(90deg); }
+
+    .ecard-body { display: none; padding: 18px 20px; border-top: 1px solid var(--border); }
+    .ecard.open .ecard-body { display: block; }
+
+    .field-label {
+      font-size: .7rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text3); margin-bottom: 6px;
+    }
+    .field-text {
+      font-size: .88rem; line-height: 1.65; color: var(--text2); margin-bottom: 16px;
+    }
+
+    .fix-box {
+      background: linear-gradient(135deg, rgba(0,229,192,.05), rgba(91,143,255,.04));
+      border: 1px solid rgba(0,229,192,.18); border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .fix-box .field-label { color: var(--accent-g); }
+    .fix-box .field-text  { color: var(--text); margin-bottom: 0; }
+
+    /* Original / fixed line diff */
+    .diff-block {
+      margin-top: 12px; border-radius: 8px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .diff-row {
+      display: flex; font-family: var(--font-code); font-size: .8rem; line-height: 1.6;
+    }
+    .diff-sign {
+      padding: 5px 10px; font-weight: 700; flex-shrink: 0; min-width: 28px;
+      text-align: center;
+    }
+    .diff-code { padding: 5px 10px; flex: 1; overflow-x: auto; white-space: pre; }
+    .diff-row.minus { background: rgba(255,77,106,.08); }
+    .diff-row.minus .diff-sign { color: var(--danger); }
+    .diff-row.plus  { background: rgba(0,212,138,.08); }
+    .diff-row.plus  .diff-sign { color: var(--ok); }
+
+    /* ── Corrected code ──────────────────────── */
+    .corr-section { margin-top: 32px; animation: rise .4s ease .1s forwards; opacity: 0; }
+    .corr-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .corr-title {
+      font-size: 1.05rem; font-weight: 700;
+      display: flex; align-items: center; gap: 9px;
+    }
+    .corr-check {
+      width: 24px; height: 24px; border-radius: 7px;
+      background: rgba(0,212,138,.12); color: var(--ok);
+      display: flex; align-items: center; justify-content: center; font-size: .8rem;
+      flex-shrink: 0;
+    }
+
+    .btn-copy {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 16px; border-radius: 9px; font-size: .8rem; font-weight: 600;
+      font-family: var(--font-ui); cursor: pointer; transition: all .2s;
+      background: var(--surface2); border: 1px solid var(--border2); color: var(--text2);
+    }
+    .btn-copy:hover  { border-color: var(--accent); color: var(--accent); background: rgba(91,143,255,.07); }
+    .btn-copy.copied { border-color: var(--ok); color: var(--ok); background: rgba(0,212,138,.07); }
+
+    .code-block {
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .code-block pre {
+      padding: 22px 24px; overflow-x: auto;
+      font-family: var(--font-code); font-size: .85rem;
+      line-height: 1.75; color: #c9d1e8; white-space: pre;
+    }
+
+    /* ── No-error state ──────────────────────── */
+    .no-err {
+      text-align: center; padding: 40px 20px; border-radius: var(--radius);
+      background: rgba(0,212,138,.05); border: 1px solid rgba(0,212,138,.2);
+      margin-bottom: 24px; animation: rise .3s ease forwards;
+    }
+    .no-err-icon { font-size: 3rem; margin-bottom: 12px; }
+    .no-err h3 { font-size: 1.2rem; font-weight: 700; color: var(--ok); margin-bottom: 6px; }
+    .no-err p  { color: var(--text2); font-size: .9rem; }
+
+    /* ── Toast ───────────────────────────────── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 100;
+      background: var(--danger); color: #fff; padding: 12px 20px;
+      border-radius: 10px; font-size: .85rem; font-weight: 500; max-width: 360px;
+      transform: translateY(80px); opacity: 0; transition: all .3s;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* ── Scrollbar ───────────────────────────── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<div class="bg-layer">
+  <div class="bg-grid"></div>
+  <div class="bg-orb orb1"></div>
+  <div class="bg-orb orb2"></div>
+</div>
+
+<header>
+  <a class="logo" href="/">
+    <div class="logo-mark">🔬</div>
+    <span class="logo-name">Octave<em>Debug</em></span>
+  </a>
+  <div class="header-pills">
+    <span class="pill pill-local">✓ No API Key</span>
+    <span class="pill pill-offline">100% Local</span>
+  </div>
+</header>
+
+<main>
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-tag">
+      <span>⚡</span> Rule-based Static Analyzer
+    </div>
+    <h1>Find & Fix <span class="grad">Octave Errors</span><br/>Instantly — Offline</h1>
+    <p>No API key. No internet. Paste your Octave code and get instant error detection with auto-corrected output.</p>
+  </div>
+
+  <!-- Stats strip -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-num">13</div>
+      <div class="stat-label">Error Rules</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">3</div>
+      <div class="stat-label">Severity Levels</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">100%</div>
+      <div class="stat-label">Offline</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">0</div>
+      <div class="stat-label">API Calls</div>
+    </div>
+  </div>
+
+  <!-- Editor -->
+  <div class="card">
+    <div class="card-header">
+      <div class="win-dots">
+        <div class="wd wd-r"></div><div class="wd wd-y"></div><div class="wd wd-g"></div>
+      </div>
+      <span class="card-title">your_script.m</span>
+      <div class="card-actions">
+        <button class="btn-sm btn-ghost" onclick="loadExample()">Load Example</button>
+        <button class="btn-sm btn-ghost" onclick="clearAll()">Clear</button>
+      </div>
+    </div>
+
+    <textarea id="code-input" spellcheck="false"
+      placeholder="% Paste your Octave code here and click Analyze...
+%
+% Example bugs we detect:
+%   x = myArray(0)          % Zero-index error
+%   printf('hello\n')       % Should be fprintf
+%   if x = 5               % Should be ==
+%   for i = 1:n            % (missing end)"></textarea>
+
+    <div class="card-footer">
+      <span class="footer-hint">Tab → 2 spaces &nbsp;·&nbsp; Ctrl+Enter → Analyze</span>
+      <button class="btn-analyze" id="analyze-btn" onclick="analyzeCode()">
+        <span class="btn-icon">⚡</span> Analyze Code
+      </button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading">
+    <div class="spin"></div>
+    <div class="load-text">Scanning code</div>
+  </div>
+
+  <!-- Output -->
+  <div id="output"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── Tab & hotkey support ──────────────────
+  document.getElementById('code-input').addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const s = e.target.selectionStart, end = e.target.selectionEnd;
+      e.target.value = e.target.value.substring(0, s) + '  ' + e.target.value.substring(end);
+      e.target.selectionStart = e.target.selectionEnd = s + 2;
+    }
+    if (e.ctrlKey && e.key === 'Enter') analyzeCode();
+  });
+
+  // ── Helpers ───────────────────────────────
+  function esc(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showToast(msg, duration = 3500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), duration);
+  }
+
+  function clearAll() {
+    document.getElementById('code-input').value = '';
+    document.getElementById('output').innerHTML = '';
+    document.getElementById('code-input').focus();
+  }
+
+  function loadExample() {
+    document.getElementById('code-input').value =
+`function result = demo_function(x, y)
+  % Demo with intentional errors
+  result = x + y
+  if result = 10
+    printf('Result is ten\n')
+  end
+
+  arr = [1, 2, 3, 4, 5];
+  first = arr(0);
+  last = arr(1:length(arr));
+
+  for i = 1:5
+    total = total + i;
+  % missing end
+
+  if x != 0
+    scaled = result / 0;
+  end
+
+`;
+    document.getElementById('output').innerHTML = '';
+    document.getElementById('code-input').focus();
+  }
+
+  // ── Main analyze ──────────────────────────
+  async function analyzeCode() {
+    const code = document.getElementById('code-input').value.trim();
+    if (!code) { showToast('Please enter some Octave code first.'); return; }
+
+    document.getElementById('analyze-btn').disabled = true;
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('output').innerHTML = '';
+
+    try {
+      const resp = await fetch('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+      if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+      const result = await resp.json();
+      renderOutput(result);
+    } catch(err) {
+      showToast('Error: ' + err.message);
+    } finally {
+      document.getElementById('analyze-btn').disabled = false;
+      document.getElementById('loading').style.display = 'none';
+    }
+  }
+
+  // ── Render output ─────────────────────────
+  function renderOutput(result) {
+    const out = document.getElementById('output');
+    const errors = result.errors || [];
+    const n = errors.length;
+
+    const errCount  = errors.filter(e => e.severity === 'error').length;
+    const warnCount = errors.filter(e => e.severity === 'warning').length;
+    const infoCount = errors.filter(e => e.severity === 'info').length;
+
+    let html = '';
+
+    // ── Summary banner
+    if (n === 0) {
+      html += `
+        <div class="no-err">
+          <div class="no-err-icon">✅</div>
+          <h3>Clean Code!</h3>
+          <p>${esc(result.summary)}</p>
+        </div>`;
+    } else {
+      html += `
+        <div class="summary-banner banner-err">
+          <div class="summary-icon">🔍</div>
+          <div>
+            <div class="summary-label">Analysis Complete</div>
+            <div class="summary-text">${esc(result.summary)}</div>
+          </div>
+        </div>`;
+
+      // Severity chips
+      html += '<div class="sev-strip">';
+      if (errCount)  html += `<div class="sev-chip chip-error">⛔ ${errCount} Error${errCount>1?'s':''}</div>`;
+      if (warnCount) html += `<div class="sev-chip chip-warn">⚠️ ${warnCount} Warning${warnCount>1?'s':''}</div>`;
+      if (infoCount) html += `<div class="sev-chip chip-info">💡 ${infoCount} Suggestion${infoCount>1?'s':''}</div>`;
+      html += '</div>';
+
+      // Error cards
+      html += `
+        <div class="errors-title">
+          Issues Found <span class="err-badge">${n}</span>
+        </div>`;
+
+      errors.forEach((e, i) => {
+        const sev = e.severity || 'error';
+        const sevLabel = { error: '⛔ Error', warning: '⚠️ Warning', info: '💡 Suggestion' }[sev] || sev;
+        const lineText = e.line ? `Line ${e.line}` : 'Global';
+
+        let diffHtml = '';
+        if (e.original_line && e.fixed_line && e.original_line !== e.fixed_line) {
+          diffHtml = `
+            <div class="diff-block">
+              <div class="diff-row minus">
+                <div class="diff-sign">−</div>
+                <div class="diff-code">${esc(e.original_line)}</div>
+              </div>
+              <div class="diff-row plus">
+                <div class="diff-sign">+</div>
+                <div class="diff-code">${esc(e.fixed_line)}</div>
+              </div>
+            </div>`;
+        }
+
+        html += `
+          <div class="ecard" id="ec${i}">
+            <div class="ecard-head" onclick="toggle(${i})">
+              <div class="sev-dot ${sev}"></div>
+              <div class="ecard-num ${sev}">#${e.id}</div>
+              <div class="ecard-meta">
+                <div class="ecard-type">${esc(e.type)}</div>
+                <div class="ecard-line">${sevLabel} · ${lineText}</div>
+              </div>
+              <div class="ecard-chevron">▶</div>
+            </div>
+            <div class="ecard-body">
+              <div class="field-label">What's wrong</div>
+              <div class="field-text">${esc(e.description)}</div>
+              <div class="fix-box">
+                <div class="field-label">How to fix it</div>
+                <div class="field-text">${esc(e.solution)}</div>
+              </div>
+              ${diffHtml}
+            </div>
+          </div>`;
+      });
+    }
+
+    // ── Corrected code section
+    html += `
+      <div class="corr-section" id="corr-section">
+        <div class="corr-head">
+          <div class="corr-title">
+            <div class="corr-check">✓</div>
+            Corrected Code
+          </div>
+          <button class="btn-copy" id="copy-btn" onclick="copyCode()">
+            <span>⎘</span> Copy Code
+          </button>
+        </div>
+        <div class="code-block">
+          <pre id="corr-pre">${esc(result.corrected_code)}</pre>
+        </div>
+      </div>`;
+
+    out.innerHTML = html;
+    window._corrected = result.corrected_code;
+
+    // Open first error
+    if (errors.length > 0) setTimeout(() => toggle(0), 80);
+
+    // Animate corrected section
+    setTimeout(() => {
+      const cs = document.getElementById('corr-section');
+      if (cs) cs.style.opacity = '1';
+    }, 350);
+  }
+
+  function toggle(i) {
+    const card = document.getElementById('ec' + i);
+    if (card) card.classList.toggle('open');
+  }
+
+  function copyCode() {
+    const code = window._corrected || '';
+    navigator.clipboard.writeText(code).then(() => {
+      const btn = document.getElementById('copy-btn');
+      btn.innerHTML = '<span>✓</span> Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = '<span>⎘</span> Copy Code';
+        btn.classList.remove('copied');
+      }, 2200);
+    }).catch(() => {
+      const ta = document.createElement('textarea');
+      ta.value = code; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+    });
+  }
+</script>
+</body>
+</html>
